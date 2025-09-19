@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <div class="flex justify-between items-center mb-8">
+        <h2 class="text-3xl font-bold">Admin Dashboard</h2>
+        <div class="space-x-3">
+            <a href="/admin/add_donation" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Add Donation</a>
+            <a href="/change_password" class="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700">Change Password</a>
+            <a href="/logout" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">Logout</a>
+        </div>
+    </div>
+
+    <!-- Statistics -->
+    <div class="grid md:grid-cols-5 gap-6 mb-8">
+        <div class="bg-white p-6 rounded-lg shadow-md text-center">
+            <div class="text-2xl font-bold text-blue-600">{{ total_donations }}</div>
+            <div class="text-sm text-gray-600">Total Donations</div>
+        </div>
+        <div class="bg-white p-6 rounded-lg shadow-md text-center">
+            <div class="text-2xl font-bold text-green-600">${{ "%.2f"|format(total_amount) }}</div>
+            <div class="text-sm text-gray-600">Total Amount</div>
+        </div>
+        <div class="bg-white p-6 rounded-lg shadow-md text-center">
+            <div class="text-2xl font-bold text-purple-600">{{ used_donations }}</div>
+            <div class="text-sm text-gray-600">Funds Used</div>
+        </div>
+        <div class="bg-white p-6 rounded-lg shadow-md text-center">
+            <div class="text-2xl font-bold text-orange-600">{{ users|length }}</div>
+            <div class="text-sm text-gray-600">Registered Users</div>
+        </div>
+        <div class="bg-white p-6 rounded-lg shadow-md text-center">
+            <div class="text-2xl font-bold text-red-600">{{ unlinked_donations }}</div>
+            <div class="text-sm text-gray-600">Unlinked Donations</div>
+        </div>
+    </div>
+
+    {% if unlinked_donations > 0 %}
+    <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+        <div class="flex">
+            <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                </svg>
+            </div>
+            <div class="ml-3">
+                <p class="text-sm text-yellow-700">
+                    <strong>{{ unlinked_donations }} donations are not linked to user accounts.</strong>
+                    These donations were added before users registered.
+                    <form method="POST" action="/admin/link_donations" class="inline ml-2">
+                        <button type="submit" class="bg-yellow-500 text-white px-3 py-1 rounded text-xs hover:bg-yellow-600">
+                            Auto-Link Now
+                        </button>
+                    </form>
+                </p>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- All Donations Table -->
+    <div class="bg-white rounded-lg shadow-md">
+        <div class="p-6 border-b">
+            <h3 class="text-xl font-semibold">All Donations</h3>
+        </div>
+
+        {% if donations %}
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Donor</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Purpose</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Linked</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    {% for donation in donations %}
+                    <tr>
+                        <td class="px-4 py-4 text-sm text-gray-900">{{ donation.created_at.strftime('%Y-%m-%d') }}</td>
+                        <td class="px-4 py-4 text-sm text-gray-900">{{ donation.donor_name }}</td>
+                        <td class="px-4 py-4 text-sm text-gray-900">{{ donation.email }}</td>
+                        <td class="px-4 py-4 text-sm font-medium text-gray-900">${{ "%.2f"|format(donation.amount) }}</td>
+                        <td class="px-4 py-4 text-sm text-gray-900">{{ donation.purpose or '-' }}</td>
+                        <td class="px-4 py-4">
+                            <span class="px-2 py-1 text-xs font-semibold rounded-full
+                                {% if donation.status == 'received' %}bg-yellow-100 text-yellow-800
+                                {% elif donation.status == 'allocated' %}bg-blue-100 text-blue-800
+                                {% elif donation.status == 'used' %}bg-green-100 text-green-800
+                                {% endif %}">
+                                {{ donation.status.title() }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-4">
+                            {% if donation.user_id %}
+                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">Linked</span>
+                            {% else %}
+                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">Unlinked</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-4">
+                            <button onclick="editDonation({{ donation.id }}, '{{ donation.status }}', '{{ donation.usage_details or '' }}')" 
+                                    class="text-blue-600 hover:text-blue-800 text-sm">Edit</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="p-6 text-center text-gray-500">
+            <p>No donations yet.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Edit Donation Modal -->
+<div id="editModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden">
+    <div class="flex items-center justify-center min-h-screen">
+        <div class="bg-white p-6 rounded-lg shadow-xl max-w-md w-full mx-4">
+            <h3 class="text-lg font-semibold mb-4">Update Donation Status</h3>
+            <form id="editForm" method="POST">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                    <select name="status" id="statusSelect" class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
+                        <option value="received">Received</option>
+                        <option value="allocated">Allocated</option>
+                        <option value="used">Used</option>
+                    </select>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Usage Details</label>
+                    <textarea name="usage_details" id="usageDetails" rows="3" 
+                              class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+                              placeholder="How was this donation used?"></textarea>
+                </div>
+                <div class="flex justify-end space-x-4">
+                    <button type="button" onclick="closeEditModal()" 
+                            class="px-4 py-2 text-gray-600 border border-gray-300 rounded hover:bg-gray-50">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Update</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function editDonation(id, status, usageDetails) {
+    document.getElementById('editForm').action = `/admin/update_donation/${id}`;
+    document.getElementById('statusSelect').value = status;
+    document.getElementById('usageDetails').value = usageDetails;
+    document.getElementById('editModal').classList.remove('hidden');
+}
+
+function closeEditModal() {
+    document.getElementById('editModal').classList.add('hidden');
+}
+</script>
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto">
+    <h2 class="text-3xl font-bold mb-8 text-center">Public Donation Report</h2>
+    
+    <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+        <h3 class="text-xl font-semibold mb-4">Transparency Summary</h3>
+        <div class="grid md:grid-cols-3 gap-4">
+            <div class="text-center p-4 bg-blue-50 rounded">
+                <div class="text-2xl font-bold text-blue-600">{{ donations|length }}</div>
+                <div class="text-sm text-gray-600">Total Donations</div>
+            </div>
+            <div class="text-center p-4 bg-green-50 rounded">
+                <div class="text-2xl font-bold text-green-600">${{ "%.2f"|format(donations|sum(attribute='amount') or 0) }}</div>
+                <div class="text-sm text-gray-600">Total Raised</div>
+            </div>
+            <div class="text-center p-4 bg-purple-50 rounded">
+                <div class="text-2xl font-bold text-purple-600">{{ donations|selectattr("status", "equalto", "used")|list|length }}</div>
+                <div class="text-sm text-gray-600">Projects Funded</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="bg-white rounded-lg shadow-md">
+        <div class="p-6 border-b">
+            <h3 class="text-xl font-semibold">Anonymous Donation Details</h3>
+            <p class="text-sm text-gray-600 mt-2">All donor information is anonymized for privacy protection</p>
+        </div>
+        
+        {% if donations %}
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Donor</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Purpose</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">How It Was Used</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    {% for donation in donations %}
+                    <tr>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {{ donation.created_at.strftime('%Y-%m-%d') }}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ donation.donor_name }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            ${{ "%.2f"|format(donation.amount) }}
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-900">{{ donation.purpose or '-' }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="px-2 py-1 text-xs font-semibold rounded-full 
+                                {% if donation.status == 'received' %}bg-yellow-100 text-yellow-800
+                                {% elif donation.status == 'allocated' %}bg-blue-100 text-blue-800
+                                {% elif donation.status == 'used' %}bg-green-100 text-green-800
+                                {% endif %}">
+                                {{ donation.status.title() }}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-900">{{ donation.usage_details or 'Pending allocation' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="p-6 text-center text-gray-500">
+            <p>No donations to display yet.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

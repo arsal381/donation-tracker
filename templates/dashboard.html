@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <div class="flex justify-between items-center mb-8">
+        <h2 class="text-3xl font-bold">Welcome, {{ user.full_name }}</h2>
+        <div class="flex space-x-3">
+            <a href="/change_password" class="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700 transition-colors">
+                <span class="flex items-center space-x-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m0 0a2 2 0 012 2m-2-2h-6m6 0v6a2 2 0 01-2 2m-2-2H9m10-10a2 2 0 00-2-2m-2 0H9a2 2 0 00-2 2v6c0 1.1.9 2 2 2h6m-6-8a2 2 0 00-2 2v6a2 2 0 002 2h6a2 2 0 002-2V9a2 2 0 00-2-2H9z"></path>
+                    </svg>
+                    <span>Change Password</span>
+                </span>
+            </a>
+            <a href="/logout" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition-colors">
+                <span class="flex items-center space-x-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+                    </svg>
+                    <span>Logout</span>
+                </span>
+            </a>
+        </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+        <h3 class="text-xl font-semibold mb-4">Your Donation Summary</h3>
+        <div class="grid md:grid-cols-3 gap-4">
+            <div class="text-center p-4 bg-blue-50 rounded">
+                <div class="text-2xl font-bold text-blue-600">{{ donations|length }}</div>
+                <div class="text-sm text-gray-600">Total Donations</div>
+            </div>
+            <div class="text-center p-4 bg-green-50 rounded">
+                <div class="text-2xl font-bold text-green-600">${{ "%.2f"|format(donations|sum(attribute='amount') or 0) }}</div>
+                <div class="text-sm text-gray-600">Total Amount</div>
+            </div>
+            <div class="text-center p-4 bg-purple-50 rounded">
+                <div class="text-2xl font-bold text-purple-600">{{ donations|selectattr("status", "equalto", "used")|list|length }}</div>
+                <div class="text-sm text-gray-600">Funds Used</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow-md">
+        <div class="p-6 border-b">
+            <h3 class="text-xl font-semibold">Your Donations</h3>
+        </div>
+
+        {% if donations %}
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Purpose</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usage</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                    {% for donation in donations %}
+                    <tr>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {{ donation.created_at.strftime('%Y-%m-%d') }}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            ${{ "%.2f"|format(donation.amount) }}
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-900">{{ donation.purpose or '-' }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="px-2 py-1 text-xs font-semibold rounded-full
+                                {% if donation.status == 'received' %}bg-yellow-100 text-yellow-800
+                                {% elif donation.status == 'allocated' %}bg-blue-100 text-blue-800
+                                {% elif donation.status == 'used' %}bg-green-100 text-green-800
+                                {% endif %}">
+                                {{ donation.status.title() }}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-900">{{ donation.usage_details or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="p-6 text-center text-gray-500">
+            <p>No donations yet.</p>
+            <p class="text-sm mt-2">Your donations will appear here when the admin adds them to your account.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

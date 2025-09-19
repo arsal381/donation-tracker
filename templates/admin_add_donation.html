@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="flex justify-between items-center mb-8">
+        <h2 class="text-3xl font-bold">Add New Donation</h2>
+        <a href="/admin/dashboard" class="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700">Back to Dashboard</a>
+    </div>
+    
+    <div class="bg-white p-8 rounded-lg shadow-md">
+        <form method="POST" enctype="multipart/form-data">
+            <div class="grid md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Donor Name</label>
+                    <input class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500" 
+                           type="text" name="donor_name" required>
+                </div>
+                
+                <div>
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Email</label>
+                    <input class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500" 
+                           type="email" name="email" required>
+                </div>
+            </div>
+            
+            <div class="grid md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Amount ($)</label>
+                    <input class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500" 
+                           type="number" name="amount" step="0.01" min="1" required>
+                </div>
+                
+                <div>
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Status</label>
+                    <select name="status" class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
+                        <option value="received">Received</option>
+                        <option value="allocated">Allocated</option>
+                        <option value="used">Used</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2">Purpose/Cause</label>
+                <textarea class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500" 
+                          name="purpose" rows="3" placeholder="What is this donation for?"></textarea>
+            </div>
+            
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2">Usage Details</label>
+                <textarea class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500" 
+                          name="usage_details" rows="3" placeholder="How was/will this donation be used?"></textarea>
+            </div>
+            
+            <div class="mb-6">
+                <label class="block text-gray-700 text-sm font-bold mb-2">Receipt/Proof (Optional)</label>
+                <input class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500" 
+                       type="file" name="receipt" accept=".jpg,.jpeg,.png,.pdf">
+            </div>
+            
+            <button class="w-full bg-green-600 text-white font-bold py-3 px-4 rounded hover:bg-green-700" 
+                    type="submit">
+                Add Donation
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}

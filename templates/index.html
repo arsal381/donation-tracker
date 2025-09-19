@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="text-center">
+    <h1 class="text-4xl font-bold text-gray-800 mb-6">Welcome to DonateTracker</h1>
+    <p class="text-lg text-gray-600 mb-8">Transparent donation management for a better world</p>
+    
+    <div class="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
+        <div class="bg-white p-6 rounded-lg shadow-md">
+            <div class="text-green-600 text-3xl mb-4">📊</div>
+            <h3 class="text-xl font-semibold mb-2">Track Your Donations</h3>
+            <p class="text-gray-600 mb-4">Login to see how your donations are making a difference</p>
+            <a href="/login" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">Login</a>
+        </div>
+        
+        <div class="bg-white p-6 rounded-lg shadow-md">
+            <div class="text-purple-600 text-3xl mb-4">🌍</div>
+            <h3 class="text-xl font-semibold mb-2">Public Transparency</h3>
+            <p class="text-gray-600 mb-4">View how donations are being used publicly</p>
+            <a href="/public" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">View Report</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
