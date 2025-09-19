@@ -2,59 +2,39 @@ from fastapi import FastAPI, Request, Form, File, UploadFile, Depends, HTTPExcep
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, Boolean
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime, timedelta
 import hashlib
 import secrets
 import os
-from typing import Optional
 import shutil
+import json
+from typing import Optional, List, Dict, Any
 
-# Database setup
-DATABASE_URL = "sqlite:///./donations.db"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-
-# Models
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True)
-    password_hash = Column(String)
-    full_name = Column(String)
-    is_admin = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 
-class Donation(Base):
-    __tablename__ = "donations"
+# Initialize Firebase
+def initialize_firebase():
+    try:
+        # Try to get credentials from environment variable (for Render deployment)
+        firebase_creds = os.environ.get('FIREBASE_CREDENTIALS')
+        if firebase_creds:
+            # Parse the JSON credentials from environment variable
+            cred_dict = json.loads(firebase_creds)
+            cred = credentials.Certificate(cred_dict)
+        else:
+            # For local development, use service account file
+            cred = credentials.Certificate("firebase-service-account.json")
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer)
-    donor_name = Column(String)
-    email = Column(String)
-    amount = Column(Float)
-    status = Column(String, default="received")  # received, allocated, used
-    purpose = Column(Text)
-    usage_details = Column(Text)
-    receipt_filename = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+        firebase_admin.initialize_app(cred)
+        print("✓ Firebase initialized successfully")
+    except Exception as e:
+        print(f"Error initializing Firebase: {e}")
+        # For development without Firebase setup
+        return None
 
-
-class Session(Base):
-    __tablename__ = "sessions"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer)
-    token = Column(String, unique=True)
-    expires_at = Column(DateTime)
+    return firestore.client()
 
 
 # Create directories first
@@ -62,82 +42,8 @@ os.makedirs("templates", exist_ok=True)
 os.makedirs("static", exist_ok=True)
 os.makedirs("uploads", exist_ok=True)
 
-# Create tables
-Base.metadata.create_all(bind=engine)
-
-# Security
-security = HTTPBearer(auto_error=False)
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
-
-
-def create_session_token() -> str:
-    return secrets.token_urlsafe(32)
-
-
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
-    if not credentials:
-        return None
-
-    session = db.query(Session).filter(
-        Session.token == credentials.credentials,
-        Session.expires_at > datetime.utcnow()
-    ).first()
-
-    if not session:
-        return None
-
-    user = db.query(User).filter(User.id == session.user_id).first()
-    return user
-
-
-def get_current_user_from_cookie(request: Request, db: Session = Depends(get_db)):
-    token = request.cookies.get("token")
-    if not token:
-        return None
-
-    session = db.query(Session).filter(
-        Session.token == token,
-        Session.expires_at > datetime.utcnow()
-    ).first()
-
-    if not session:
-        return None
-
-    user = db.query(User).filter(User.id == session.user_id).first()
-    return user
-
-
-# Create default admin account
-def create_default_admin():
-    db = SessionLocal()
-    try:
-        admin_exists = db.query(User).filter(User.email == "admin@donatetracker.com").first()
-        if not admin_exists:
-            admin_user = User(
-                email="admin@donatetracker.com",
-                password_hash=hash_password("admin123"),
-                full_name="System Administrator",
-                is_admin=True
-            )
-            db.add(admin_user)
-            db.commit()
-            print("✓ Default admin account created: admin@donatetracker.com / admin123")
-    except Exception as e:
-        print(f"Error creating admin account: {e}")
-    finally:
-        db.close()
-
+# Initialize Firebase
+db = initialize_firebase()
 
 # FastAPI app
 app = FastAPI(title="Donation Management System")
@@ -147,7 +53,299 @@ templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-# Create admin account after defining hash_password
+
+# Helper functions
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def create_session_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+# Database helper functions
+def get_user_by_email(email: str) -> Optional[Dict]:
+    if not db:
+        return None
+    try:
+        users_ref = db.collection('users')
+        query = users_ref.where('email', '==', email).limit(1)
+        docs = query.stream()
+        for doc in docs:
+            user_data = doc.to_dict()
+            user_data['id'] = doc.id
+            return user_data
+        return None
+    except Exception as e:
+        print(f"Error getting user: {e}")
+        return None
+
+
+def get_user_by_id(user_id: str) -> Optional[Dict]:
+    if not db:
+        return None
+    try:
+        user_ref = db.collection('users').document(user_id)
+        doc = user_ref.get()
+        if doc.exists:
+            user_data = doc.to_dict()
+            user_data['id'] = doc.id
+            return user_data
+        return None
+    except Exception as e:
+        print(f"Error getting user by ID: {e}")
+        return None
+
+
+def create_user(email: str, password: str, full_name: str, is_admin: bool = False) -> Optional[str]:
+    if not db:
+        return None
+    try:
+        user_data = {
+            'email': email,
+            'password_hash': hash_password(password),
+            'full_name': full_name,
+            'is_admin': is_admin,
+            'created_at': datetime.utcnow()
+        }
+        doc_ref = db.collection('users').add(user_data)
+        return doc_ref[1].id
+    except Exception as e:
+        print(f"Error creating user: {e}")
+        return None
+
+
+def create_session(user_id: str, token: str) -> bool:
+    if not db:
+        return False
+    try:
+        session_data = {
+            'user_id': user_id,
+            'token': token,
+            'expires_at': datetime.utcnow() + timedelta(days=7)
+        }
+        db.collection('sessions').add(session_data)
+        return True
+    except Exception as e:
+        print(f"Error creating session: {e}")
+        return False
+
+
+def get_user_from_token(token: str) -> Optional[Dict]:
+    if not db:
+        return None
+    try:
+        # Get session
+        sessions_ref = db.collection('sessions')
+        query = sessions_ref.where('token', '==', token).where('expires_at', '>', datetime.utcnow()).limit(1)
+        docs = query.stream()
+
+        for doc in docs:
+            session_data = doc.to_dict()
+            user_id = session_data.get('user_id')
+            return get_user_by_id(user_id)
+        return None
+    except Exception as e:
+        print(f"Error getting user from token: {e}")
+        return None
+
+
+def get_user_donations(user_id: str) -> List[Dict]:
+    if not db:
+        return []
+    try:
+        donations_ref = db.collection('donations')
+        query = donations_ref.where('user_id', '==', user_id).order_by('created_at',
+                                                                       direction=firestore.Query.DESCENDING)
+        docs = query.stream()
+
+        donations = []
+        for doc in docs:
+            donation_data = doc.to_dict()
+            donation_data['id'] = doc.id
+            donations.append(donation_data)
+        return donations
+    except Exception as e:
+        print(f"Error getting user donations: {e}")
+        return []
+
+
+def get_all_donations() -> List[Dict]:
+    if not db:
+        return []
+    try:
+        donations_ref = db.collection('donations')
+        query = donations_ref.order_by('created_at', direction=firestore.Query.DESCENDING)
+        docs = query.stream()
+
+        donations = []
+        for doc in docs:
+            donation_data = doc.to_dict()
+            donation_data['id'] = doc.id
+            donations.append(donation_data)
+        return donations
+    except Exception as e:
+        print(f"Error getting all donations: {e}")
+        return []
+
+
+def create_donation(user_id: Optional[str], donor_name: str, email: str, amount: float,
+                    purpose: str, status: str = "received", usage_details: str = "",
+                    receipt_filename: Optional[str] = None) -> Optional[str]:
+    if not db:
+        return None
+    try:
+        donation_data = {
+            'user_id': user_id,
+            'donor_name': donor_name,
+            'email': email,
+            'amount': amount,
+            'status': status,
+            'purpose': purpose,
+            'usage_details': usage_details,
+            'receipt_filename': receipt_filename,
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow()
+        }
+        doc_ref = db.collection('donations').add(donation_data)
+        return doc_ref[1].id
+    except Exception as e:
+        print(f"Error creating donation: {e}")
+        return None
+
+
+def update_donation(donation_id: str, status: str, usage_details: str) -> bool:
+    if not db:
+        return False
+    try:
+        donation_ref = db.collection('donations').document(donation_id)
+        donation_ref.update({
+            'status': status,
+            'usage_details': usage_details,
+            'updated_at': datetime.utcnow()
+        })
+        return True
+    except Exception as e:
+        print(f"Error updating donation: {e}")
+        return False
+
+
+def update_user_password(user_id: str, new_password_hash: str) -> bool:
+    if not db:
+        return False
+    try:
+        user_ref = db.collection('users').document(user_id)
+        user_ref.update({'password_hash': new_password_hash})
+        return True
+    except Exception as e:
+        print(f"Error updating password: {e}")
+        return False
+
+
+def delete_user_sessions(user_id: str) -> bool:
+    if not db:
+        return False
+    try:
+        sessions_ref = db.collection('sessions')
+        query = sessions_ref.where('user_id', '==', user_id)
+        docs = query.stream()
+
+        for doc in docs:
+            doc.reference.delete()
+        return True
+    except Exception as e:
+        print(f"Error deleting sessions: {e}")
+        return False
+
+
+def get_unlinked_donations() -> List[Dict]:
+    if not db:
+        return []
+    try:
+        donations_ref = db.collection('donations')
+        query = donations_ref.where('user_id', '==', None)
+        docs = query.stream()
+
+        donations = []
+        for doc in docs:
+            donation_data = doc.to_dict()
+            donation_data['id'] = doc.id
+            donations.append(donation_data)
+        return donations
+    except Exception as e:
+        print(f"Error getting unlinked donations: {e}")
+        return []
+
+
+def link_donations_to_user(email: str, user_id: str) -> int:
+    if not db:
+        return 0
+    try:
+        donations_ref = db.collection('donations')
+        query = donations_ref.where('email', '==', email).where('user_id', '==', None)
+        docs = query.stream()
+
+        count = 0
+        for doc in docs:
+            doc.reference.update({'user_id': user_id})
+            count += 1
+        return count
+    except Exception as e:
+        print(f"Error linking donations: {e}")
+        return 0
+
+
+def get_all_users() -> List[Dict]:
+    if not db:
+        return []
+    try:
+        users_ref = db.collection('users')
+        query = users_ref.where('is_admin', '==', False)
+        docs = query.stream()
+
+        users = []
+        for doc in docs:
+            user_data = doc.to_dict()
+            user_data['id'] = doc.id
+            users.append(user_data)
+        return users
+    except Exception as e:
+        print(f"Error getting users: {e}")
+        return []
+
+
+# Auth helper
+def get_current_user_from_cookie(request: Request) -> Optional[Dict]:
+    token = request.cookies.get("token")
+    if not token:
+        return None
+    return get_user_from_token(token)
+
+
+# Create default admin account
+def create_default_admin():
+    if not db:
+        print("⚠️ Firebase not initialized, skipping admin creation")
+        return
+
+    try:
+        admin_exists = get_user_by_email("admin@donatetracker.com")
+        if not admin_exists:
+            admin_id = create_user(
+                "admin@donatetracker.com",
+                "admin123",
+                "System Administrator",
+                is_admin=True
+            )
+            if admin_id:
+                print("✓ Default admin account created: admin@donatetracker.com / admin123")
+        else:
+            print("✓ Admin account already exists")
+    except Exception as e:
+        print(f"Error creating admin account: {e}")
+
+
+# Create admin account
 create_default_admin()
 
 
@@ -159,7 +357,6 @@ async def home(request: Request):
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    # Get query parameters for success messages
     registered = request.query_params.get("registered")
     linked = request.query_params.get("linked")
     password_changed = request.query_params.get("password_changed")
@@ -180,28 +377,25 @@ async def login_page(request: Request):
 
 
 @app.post("/login")
-async def login(request: Request, email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == email).first()
+async def login(request: Request, email: str = Form(...), password: str = Form(...)):
+    user = get_user_by_email(email)
 
-    if not user or user.password_hash != hash_password(password):
+    if not user or user['password_hash'] != hash_password(password):
         return templates.TemplateResponse("login.html", {
             "request": request,
             "error": "Invalid credentials"
         })
 
-    # Create session
     token = create_session_token()
-    session = Session(
-        user_id=user.id,
-        token=token,
-        expires_at=datetime.utcnow() + timedelta(days=7)
-    )
-    db.add(session)
-    db.commit()
-
-    response = RedirectResponse("/dashboard", status_code=303)
-    response.set_cookie("token", token, httponly=True, max_age=7 * 24 * 3600)
-    return response
+    if create_session(user['id'], token):
+        response = RedirectResponse("/dashboard", status_code=303)
+        response.set_cookie("token", token, httponly=True, max_age=7 * 24 * 3600)
+        return response
+    else:
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Login failed. Please try again."
+        })
 
 
 @app.get("/register", response_class=HTMLResponse)
@@ -214,43 +408,27 @@ async def register(
         request: Request,
         email: str = Form(...),
         password: str = Form(...),
-        full_name: str = Form(...),
-        db: Session = Depends(get_db)
+        full_name: str = Form(...)
 ):
     try:
-        # Check if user exists
-        if db.query(User).filter(User.email == email).first():
+        if get_user_by_email(email):
             return templates.TemplateResponse("register.html", {
                 "request": request,
                 "error": "Email already registered"
             })
 
-        # Create user
-        user = User(
-            email=email,
-            password_hash=hash_password(password),
-            full_name=full_name
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)  # Refresh to get the ID
+        user_id = create_user(email, password, full_name)
+        if not user_id:
+            return templates.TemplateResponse("register.html", {
+                "request": request,
+                "error": "Registration failed. Please try again."
+            })
 
-        # Auto-fetch existing donations with matching email and link to new user
-        existing_donations = db.query(Donation).filter(
-            Donation.email == email,
-            Donation.user_id.is_(None)  # Only unlinked donations
-        ).all()
-
-        linked_count = 0
-        for donation in existing_donations:
-            donation.user_id = user.id
-            linked_count += 1
-
+        # Auto-link existing donations
+        linked_count = link_donations_to_user(email, user_id)
         if linked_count > 0:
-            db.commit()
             print(f"✓ Linked {linked_count} existing donation(s) to new user: {email}")
 
-        # Redirect with success message including linked donations info
         redirect_url = f"/login?registered=true&linked={linked_count}"
         return RedirectResponse(redirect_url, status_code=303)
 
@@ -263,15 +441,15 @@ async def register(
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request, db: Session = Depends(get_db)):
-    user = get_current_user_from_cookie(request, db)
+async def dashboard(request: Request):
+    user = get_current_user_from_cookie(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
 
-    if user.is_admin:
+    if user.get('is_admin'):
         return RedirectResponse("/admin/dashboard", status_code=303)
 
-    donations = db.query(Donation).filter(Donation.user_id == user.id).all()
+    donations = get_user_donations(user['id'])
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
@@ -281,8 +459,8 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
 
 
 @app.get("/change_password", response_class=HTMLResponse)
-async def change_password_page(request: Request, db: Session = Depends(get_db)):
-    user = get_current_user_from_cookie(request, db)
+async def change_password_page(request: Request):
+    user = get_current_user_from_cookie(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
 
@@ -297,22 +475,19 @@ async def change_password(
         request: Request,
         current_password: str = Form(...),
         new_password: str = Form(...),
-        confirm_password: str = Form(...),
-        db: Session = Depends(get_db)
+        confirm_password: str = Form(...)
 ):
-    user = get_current_user_from_cookie(request, db)
+    user = get_current_user_from_cookie(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
 
-    # Validate current password
-    if user.password_hash != hash_password(current_password):
+    if user['password_hash'] != hash_password(current_password):
         return templates.TemplateResponse("change_password.html", {
             "request": request,
             "user": user,
             "error": "Current password is incorrect"
         })
 
-    # Validate new password confirmation
     if new_password != confirm_password:
         return templates.TemplateResponse("change_password.html", {
             "request": request,
@@ -320,7 +495,6 @@ async def change_password(
             "error": "New passwords do not match"
         })
 
-    # Validate password strength
     if len(new_password) < 6:
         return templates.TemplateResponse("change_password.html", {
             "request": request,
@@ -328,20 +502,15 @@ async def change_password(
             "error": "New password must be at least 6 characters long"
         })
 
-    # Update password
     try:
-        user.password_hash = hash_password(new_password)
-        db.commit()
-
-        # Invalidate all existing sessions for security
-        db.query(Session).filter(Session.user_id == user.id).delete()
-        db.commit()
-
-        # Redirect to login with success message
-        response = RedirectResponse("/login?password_changed=true", status_code=303)
-        response.delete_cookie("token")
-        return response
-
+        new_hash = hash_password(new_password)
+        if update_user_password(user['id'], new_hash):
+            delete_user_sessions(user['id'])
+            response = RedirectResponse("/login?password_changed=true", status_code=303)
+            response.delete_cookie("token")
+            return response
+        else:
+            raise Exception("Password update failed")
     except Exception as e:
         print(f"Error changing password: {e}")
         return templates.TemplateResponse("change_password.html", {
@@ -352,19 +521,19 @@ async def change_password(
 
 
 @app.get("/public", response_class=HTMLResponse)
-async def public_donations(request: Request, db: Session = Depends(get_db)):
-    donations = db.query(Donation).all()
+async def public_donations(request: Request):
+    donations = get_all_donations()
 
     # Anonymize data for public view
     anonymous_donations = []
     for donation in donations:
         anonymous_donations.append({
             "donor_name": "Anonymous Donor",
-            "amount": donation.amount,
-            "purpose": donation.purpose,
-            "status": donation.status,
-            "usage_details": donation.usage_details,
-            "created_at": donation.created_at
+            "amount": donation.get('amount', 0),
+            "purpose": donation.get('purpose', ''),
+            "status": donation.get('status', 'received'),
+            "usage_details": donation.get('usage_details', ''),
+            "created_at": donation.get('created_at')
         })
 
     return templates.TemplateResponse("public.html", {
@@ -375,19 +544,19 @@ async def public_donations(request: Request, db: Session = Depends(get_db)):
 
 # Admin Routes
 @app.get("/admin/dashboard", response_class=HTMLResponse)
-async def admin_dashboard(request: Request, db: Session = Depends(get_db)):
-    user = get_current_user_from_cookie(request, db)
-    if not user or not user.is_admin:
+async def admin_dashboard(request: Request):
+    user = get_current_user_from_cookie(request)
+    if not user or not user.get('is_admin'):
         return RedirectResponse("/login", status_code=303)
 
-    donations = db.query(Donation).order_by(Donation.created_at.desc()).all()
-    users = db.query(User).filter(User.is_admin == False).all()
+    donations = get_all_donations()
+    users = get_all_users()
 
     # Calculate statistics
     total_donations = len(donations)
-    total_amount = sum(d.amount for d in donations) if donations else 0
-    used_donations = len([d for d in donations if d.status == "used"])
-    unlinked_donations = len([d for d in donations if d.user_id is None])
+    total_amount = sum(d.get('amount', 0) for d in donations)
+    used_donations = len([d for d in donations if d.get('status') == "used"])
+    unlinked_donations = len([d for d in donations if not d.get('user_id')])
 
     return templates.TemplateResponse("admin_dashboard.html", {
         "request": request,
@@ -402,12 +571,12 @@ async def admin_dashboard(request: Request, db: Session = Depends(get_db)):
 
 
 @app.get("/admin/add_donation", response_class=HTMLResponse)
-async def admin_add_donation_page(request: Request, db: Session = Depends(get_db)):
-    user = get_current_user_from_cookie(request, db)
-    if not user or not user.is_admin:
+async def admin_add_donation_page(request: Request):
+    user = get_current_user_from_cookie(request)
+    if not user or not user.get('is_admin'):
         return RedirectResponse("/login", status_code=303)
 
-    users = db.query(User).filter(User.is_admin == False).all()
+    users = get_all_users()
     return templates.TemplateResponse("admin_add_donation.html", {
         "request": request,
         "user": user,
@@ -424,11 +593,10 @@ async def admin_add_donation(
         purpose: str = Form(...),
         status: str = Form("received"),
         usage_details: str = Form(""),
-        receipt: UploadFile = File(None),
-        db: Session = Depends(get_db)
+        receipt: UploadFile = File(None)
 ):
-    user = get_current_user_from_cookie(request, db)
-    if not user or not user.is_admin:
+    user = get_current_user_from_cookie(request)
+    if not user or not user.get('is_admin'):
         return RedirectResponse("/login", status_code=303)
 
     # Handle file upload
@@ -439,75 +607,61 @@ async def admin_add_donation(
             shutil.copyfileobj(receipt.file, buffer)
 
     # Check if user exists and link donation
-    donor_user = db.query(User).filter(User.email == email).first()
-    user_id = donor_user.id if donor_user else None
+    donor_user = get_user_by_email(email)
+    user_id = donor_user['id'] if donor_user else None
 
     # Create donation
-    donation = Donation(
-        user_id=user_id,
-        donor_name=donor_name,
-        email=email,
-        amount=amount,
-        purpose=purpose,
-        status=status,
-        usage_details=usage_details,
-        receipt_filename=receipt_filename
+    donation_id = create_donation(
+        user_id, donor_name, email, amount, purpose, status, usage_details, receipt_filename
     )
-    db.add(donation)
-    db.commit()
 
     return RedirectResponse("/admin/dashboard", status_code=303)
 
 
 @app.post("/admin/update_donation/{donation_id}")
 async def update_donation_status(
-        donation_id: int,
+        donation_id: str,
         request: Request,
         status: str = Form(...),
-        usage_details: str = Form(...),
-        db: Session = Depends(get_db)
+        usage_details: str = Form(...)
 ):
-    user = get_current_user_from_cookie(request, db)
-    if not user or not user.is_admin:
+    user = get_current_user_from_cookie(request)
+    if not user or not user.get('is_admin'):
         return RedirectResponse("/login", status_code=303)
 
-    donation = db.query(Donation).filter(Donation.id == donation_id).first()
-    if donation:
-        donation.status = status
-        donation.usage_details = usage_details
-        donation.updated_at = datetime.utcnow()
-        db.commit()
-
+    update_donation(donation_id, status, usage_details)
     return RedirectResponse("/admin/dashboard", status_code=303)
 
 
 @app.post("/admin/link_donations")
-async def admin_link_donations(request: Request, db: Session = Depends(get_db)):
-    """Admin function to retroactively link all unlinked donations to existing users"""
-    user = get_current_user_from_cookie(request, db)
-    if not user or not user.is_admin:
+async def admin_link_donations(request: Request):
+    user = get_current_user_from_cookie(request)
+    if not user or not user.get('is_admin'):
         return RedirectResponse("/login", status_code=303)
 
-    # Get all unlinked donations
-    unlinked_donations = db.query(Donation).filter(Donation.user_id.is_(None)).all()
+    # Get all unlinked donations and try to link them
+    unlinked_donations = get_unlinked_donations()
     linked_count = 0
 
     for donation in unlinked_donations:
-        # Find user with matching email
-        matching_user = db.query(User).filter(User.email == donation.email).first()
+        matching_user = get_user_by_email(donation.get('email', ''))
         if matching_user:
-            donation.user_id = matching_user.id
-            linked_count += 1
+            if update_donation(donation['id'], donation.get('status', 'received'), donation.get('usage_details', '')):
+                # Update user_id
+                try:
+                    db.collection('donations').document(donation['id']).update({'user_id': matching_user['id']})
+                    linked_count += 1
+                except Exception as e:
+                    print(f"Error linking donation: {e}")
 
     if linked_count > 0:
-        db.commit()
         print(f"✓ Admin linked {linked_count} donation(s) to existing users")
 
     return RedirectResponse("/admin/dashboard", status_code=303)
 
 
 @app.get("/logout")
-async def logout():
+async def logout(request: Request):
     response = RedirectResponse("/", status_code=303)
     response.delete_cookie("token")
     return response
